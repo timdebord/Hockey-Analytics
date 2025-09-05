@@ -1,0 +1,1279 @@
+---
+title: "Hockey"
+author: "Timothy DeBord"
+date: '`r Sys.Date()`'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+# =============================================================================
+# FINAL VERSION: Get Advanced Stats for ALL NHL Players 2024-25
+# =============================================================================
+
+# Load packages
+library(httr)
+library(jsonlite)
+library(tidyverse)
+
+# All 32 NHL teams
+nhl_teams <- c("ANA", "BOS", "BUF", "CGY", "CAR", "CHI", "COL", "CBJ", 
+               "DAL", "DET", "EDM", "FLA", "LAK", "MIN", "MTL", "NSH", 
+               "NJD", "NYI", "NYR", "OTT", "PHI", "PIT", "SJS", "SEA",
+               "STL", "TBL", "TOR", "UTA", "VAN", "VGK", "WSH", "WPG")
+
+# Function to get advanced stats for one team
+get_team_advanced_stats <- function(team_abbr) {
+  cat("Getting advanced stats for", team_abbr, "...\n")
+  
+  # The team stats endpoint that worked
+  url <- paste0("https://api.nhle.com/stats/rest/en/skater/summary?limit=100&cayenneExp=seasonId=20242025%20and%20teamAbbrevs=%22", team_abbr, "%22")
+  
+  response <- GET(url)
+  
+  if (status_code(response) == 200) {
+    data <- fromJSON(content(response, "text"))
+    
+    if (!is.null(data$data) && nrow(data$data) > 0) {
+      stats <- data$data %>%
+        mutate(team_abbr = team_abbr)  # Add team info
+      
+      cat("✓ Got", nrow(stats), "players from", team_abbr, "\n")
+      return(stats)
+    }
+  }
+  
+  cat("✗ Failed to get stats for", team_abbr, "\n")
+  return(NULL)
+}
+
+# =============================================================================
+# GET ALL TEAMS' STATS (This will take a few minutes)
+# =============================================================================
+
+cat("=== GETTING ALL NHL PLAYER STATS ===\n")
+cat("This will take 2-3 minutes to get all teams...\n\n")
+
+# Get stats for all teams
+all_team_stats <- map(nhl_teams, get_team_advanced_stats)
+
+# Remove failed teams (NULL results)
+all_team_stats <- all_team_stats[!sapply(all_team_stats, is.null)]
+
+# Combine into one massive dataset
+if (length(all_team_stats) > 0) {
+  nhl_player_stats_2024_25 <- bind_rows(all_team_stats)
+  
+  cat("\n=== SUCCESS! ===\n")
+  cat("Total players with stats:", nrow(nhl_player_stats_2024_25), "\n")
+  cat("Teams successfully retrieved:", length(unique(nhl_player_stats_2024_25$team_abbr)), "\n")
+  
+  # Show what advanced stats we have
+  cat("\n=== AVAILABLE STATS COLUMNS ===\n")
+  print(names(nhl_player_stats_2024_25))
+  
+  # Show sample of the data
+  cat("\n=== SAMPLE DATA (Top 10 Point Scorers) ===\n")
+  top_scorers <- nhl_player_stats_2024_25 %>%
+    arrange(desc(points)) %>%
+    select(skaterFullName, team_abbr, gamesPlayed, goals, assists, points, 
+           plusMinus, shots, faceoffWinPct, hits, blockedShots) %>%
+    head(10)
+  
+  print(top_scorers)
+  
+  # Show column summary for key stats
+  cat("\n=== STATS SUMMARY ===\n")
+  cat("Games played range:", min(nhl_player_stats_2024_25$gamesPlayed, na.rm=T), "-", max(nhl_player_stats_2024_25$gamesPlayed, na.rm=T), "\n")
+  cat("Goals range:", min(nhl_player_stats_2024_25$goals, na.rm=T), "-", max(nhl_player_stats_2024_25$goals, na.rm=T), "\n")  
+  cat("Points range:", min(nhl_player_stats_2024_25$points, na.rm=T), "-", max(nhl_player_stats_2024_25$points, na.rm=T), "\n")
+  cat("Shots range:", min(nhl_player_stats_2024_25$shots, na.rm=T), "-", max(nhl_player_stats_2024_25$shots, na.rm=T), "\n")
+  
+} else {
+  cat("Failed to get any team stats!\n")
+}
+
+# =============================================================================
+# SAVE YOUR DATA
+# =============================================================================
+
+# Save to CSV
+if (exists("nhl_player_stats_2024_25")) {
+  write.csv(nhl_player_stats_2024_25, "nhl_advanced_stats_2024_25.csv", row.names = FALSE)
+  cat("\n✓ Data saved to: nhl_advanced_stats_2024_25.csv\n")
+  cat("File size:", nrow(nhl_player_stats_2024_25), "players x", ncol(nhl_player_stats_2024_25), "columns\n")
+}
+```
+
+
+```{r}
+# =============================================================================
+# COMPLETE NHL DATASET - BASIC + ADVANCED STATS
+# =============================================================================
+
+library(httr)
+library(jsonlite) 
+library(tidyverse)
+
+# All NHL teams
+nhl_teams <- c("ANA", "BOS", "BUF", "CGY", "CAR", "CHI", "COL", "CBJ", 
+               "DAL", "DET", "EDM", "FLA", "LAK", "MIN", "MTL", "NSH", 
+               "NJD", "NYI", "NYR", "OTT", "PHI", "PIT", "SJS", "SEA",
+               "STL", "TBL", "TOR", "UTA", "VAN", "VGK", "WSH", "WPG")
+
+# =============================================================================
+# FUNCTION 1: Get Basic Traditional Stats
+# =============================================================================
+
+get_team_basic_stats <- function(team_abbr) {
+  cat("Getting basic stats for", team_abbr, "...\n")
+  
+  url <- paste0("https://api.nhle.com/stats/rest/en/skater/summary?cayenneExp=seasonId=20242025%20and%20teamAbbrevs=%22", team_abbr, "%22")
+  
+  response <- GET(url)
+  
+  if (status_code(response) == 200) {
+    data <- fromJSON(content(response, "text"))
+    
+    if (!is.null(data$data) && nrow(data$data) > 0) {
+      basic_stats <- data$data %>%
+        mutate(team_abbr = team_abbr)
+      
+      cat("✓ Got basic stats for", nrow(basic_stats), "players from", team_abbr, "\n")
+      return(basic_stats)
+    }
+  }
+  
+  cat("✗ Failed to get basic stats for", team_abbr, "\n")
+  return(NULL)
+}
+
+# =============================================================================
+# FUNCTION 2: Get Advanced Stats (Corsi/Fenwick)
+# =============================================================================
+
+get_team_advanced_stats <- function(team_abbr) {
+  cat("Getting advanced stats for", team_abbr, "...\n")
+  
+  url <- paste0("https://api.nhle.com/stats/rest/en/skater/summaryshooting?cayenneExp=seasonId=20242025%20and%20teamAbbrevs=%22", team_abbr, "%22")
+  
+  response <- GET(url)
+  
+  if (status_code(response) == 200) {
+    data <- fromJSON(content(response, "text"))
+    
+    if (!is.null(data$data) && nrow(data$data) > 0) {
+      advanced_stats <- data$data %>%
+        mutate(team_abbr = team_abbr) %>%
+        rename(
+          # Rename to clear terminology
+          corsi_for = satFor,
+          corsi_against = satAgainst, 
+          corsi_total = satTotal,
+          corsi_relative = satRelative,
+          corsi_close = satClose,
+          corsi_tied = satTied,
+          corsi_ahead = satAhead,
+          corsi_behind = satBehind,
+          
+          fenwick_for = usatFor,
+          fenwick_against = usatAgainst,
+          fenwick_total = usatTotal,
+          fenwick_relative = usatRelative,
+          fenwick_close = usatClose,
+          fenwick_tied = usatTied,
+          fenwick_ahead = usatAhead,
+          fenwick_behind = usatBehind,
+          
+          toi_5v5_per_game = timeOnIcePerGame5v5
+        )
+      
+      cat("✓ Got advanced stats for", nrow(advanced_stats), "players from", team_abbr, "\n")
+      return(advanced_stats)
+    }
+  }
+  
+  cat("✗ Failed to get advanced stats for", team_abbr, "\n")
+  return(NULL)
+}
+
+# =============================================================================
+# FUNCTION 3: Get Percentage Stats
+# =============================================================================
+
+get_team_percentage_stats <- function(team_abbr) {
+  cat("Getting percentage stats for", team_abbr, "...\n")
+  
+  url <- paste0("https://api.nhle.com/stats/rest/en/skater/percentages?cayenneExp=seasonId=20242025%20and%20teamAbbrevs=%22", team_abbr, "%22")
+  
+  response <- GET(url)
+  
+  if (status_code(response) == 200) {
+    data <- fromJSON(content(response, "text"))
+    
+    if (!is.null(data$data) && nrow(data$data) > 0) {
+      percentage_stats <- data$data %>%
+        mutate(team_abbr = team_abbr) %>%
+        rename(
+          corsi_percentage = satPercentage,
+          corsi_pct_ahead = satPercentageAhead,
+          corsi_pct_behind = satPercentageBehind,
+          corsi_pct_close = satPercentageClose,
+          corsi_pct_tied = satPercentageTied,
+          
+          fenwick_percentage = usatPercentage,
+          fenwick_pct_ahead = usatPercentageAhead,
+          fenwick_pct_behind = usatPercentageBehind,
+          fenwick_pct_tied = usatPercentageTied,
+          fenwick_pct_close = usatPrecentageClose,
+          
+          zone_start_pct = zoneStartPct5v5,
+          shooting_pct_5v5 = shootingPct5v5,
+          save_pct_5v5 = skaterSavePct5v5
+        )
+      
+      cat("✓ Got percentage stats for", nrow(percentage_stats), "players from", team_abbr, "\n")
+      return(percentage_stats)
+    }
+  }
+  
+  cat("✗ Failed to get percentage stats for", team_abbr, "\n")
+  return(NULL)
+}
+
+# =============================================================================
+# MAIN EXECUTION: Get Complete Dataset
+# =============================================================================
+
+cat("=== BUILDING COMPLETE NHL DATASET ===\n")
+cat("Getting BASIC + ADVANCED stats for all teams...\n")
+cat("This will take 5-10 minutes...\n\n")
+
+# PHASE 1: Get basic stats for all teams
+cat("PHASE 1: Getting basic traditional stats...\n")
+all_basic_stats <- map(nhl_teams, get_team_basic_stats)
+all_basic_stats <- all_basic_stats[!sapply(all_basic_stats, is.null)]
+
+if (length(all_basic_stats) > 0) {
+  basic_stats_combined <- bind_rows(all_basic_stats)
+  cat("✅ Basic stats collected for", nrow(basic_stats_combined), "players\n\n")
+} else {
+  stop("❌ Failed to get basic stats")
+}
+
+# PHASE 2: Get advanced stats for all teams
+cat("PHASE 2: Getting advanced stats (Corsi/Fenwick)...\n")
+all_advanced_stats <- map(nhl_teams, get_team_advanced_stats)
+all_advanced_stats <- all_advanced_stats[!sapply(all_advanced_stats, is.null)]
+
+if (length(all_advanced_stats) > 0) {
+  advanced_stats_combined <- bind_rows(all_advanced_stats)
+  cat("✅ Advanced stats collected for", nrow(advanced_stats_combined), "players\n\n")
+}
+
+# PHASE 3: Get percentage stats for all teams  
+cat("PHASE 3: Getting percentage stats...\n")
+all_percentage_stats <- map(nhl_teams, get_team_percentage_stats)
+all_percentage_stats <- all_percentage_stats[!sapply(all_percentage_stats, is.null)]
+
+if (length(all_percentage_stats) > 0) {
+  percentage_stats_combined <- bind_rows(all_percentage_stats)
+  cat("✅ Percentage stats collected for", nrow(percentage_stats_combined), "players\n\n")
+}
+
+# =============================================================================
+# COMBINE ALL DATASETS
+# =============================================================================
+
+cat("PHASE 4: Combining all datasets into master dataset...\n")
+
+# Start with basic stats as the foundation
+complete_nhl_dataset <- basic_stats_combined
+
+# Add advanced stats (Corsi/Fenwick)
+if (exists("advanced_stats_combined")) {
+  complete_nhl_dataset <- complete_nhl_dataset %>%
+    left_join(
+      advanced_stats_combined %>% 
+        select(playerId, starts_with("corsi"), starts_with("fenwick"), toi_5v5_per_game),
+      by = "playerId"
+    )
+}
+
+# Add percentage stats
+if (exists("percentage_stats_combined")) {
+  complete_nhl_dataset <- complete_nhl_dataset %>%
+    left_join(
+      percentage_stats_combined %>% 
+        select(playerId, ends_with("percentage"), ends_with("pct"), 
+               zone_start_pct, shooting_pct_5v5, save_pct_5v5),
+      by = "playerId"
+    )
+}
+
+# First, let's see what columns we actually have
+cat("Columns available in basic stats:\n")
+print(names(basic_stats_combined))
+
+if (exists("advanced_stats_combined")) {
+  cat("\nColumns available in advanced stats:\n")
+  print(names(advanced_stats_combined))
+}
+
+# Clean up and organize columns - only select columns that exist
+available_cols <- names(complete_nhl_dataset)
+
+# Define columns we want (if they exist)
+desired_basic_cols <- c("playerId", "skaterFullName", "team_abbr", "positionCode", 
+                       "shootsCatches", "gamesPlayed", "goals", "assists", "points", 
+                       "plusMinus", "shots", "hits", "blockedShots", "pim", 
+                       "shootingPct", "faceoffWinPct", "timeOnIcePerGame")
+
+# Only keep columns that actually exist
+existing_basic_cols <- desired_basic_cols[desired_basic_cols %in% available_cols]
+
+cat("\nBasic columns we'll keep:\n")
+print(existing_basic_cols)
+
+# Build the final dataset with existing columns
+complete_nhl_dataset <- complete_nhl_dataset %>%
+  # Remove duplicate team columns first
+  select(-ends_with(".x"), -ends_with(".y")) %>%
+  # Then select columns we want, only if they exist
+  select(
+    any_of(existing_basic_cols),  # Basic stats that exist
+    any_of("toi_5v5_per_game"),   # Advanced time on ice
+    starts_with("corsi"),          # All Corsi stats
+    starts_with("fenwick"),        # All Fenwick stats
+    any_of(c("zone_start_pct", "shooting_pct_5v5", "save_pct_5v5")),  # Percentages
+    everything()                   # Everything else
+  ) %>%
+  # Add calculated stats
+  mutate(
+    goals_per_game = goals / gamesPlayed,
+    assists_per_game = assists / gamesPlayed,
+    points_per_game = points / gamesPlayed,
+    shots_per_game = shots / gamesPlayed,
+    corsi_plus_minus = corsi_for - corsi_against,
+    fenwick_plus_minus = fenwick_for - fenwick_against
+  )
+
+# =============================================================================
+# RESULTS & SUMMARY
+# =============================================================================
+
+cat("\n🎉 COMPLETE NHL DATASET CREATED! 🎉\n")
+cat("Total players:", nrow(complete_nhl_dataset), "\n")
+cat("Total columns:", ncol(complete_nhl_dataset), "\n")
+cat("Teams:", length(unique(complete_nhl_dataset$team_abbr)), "\n")
+
+# Show what we have
+cat("\n=== BASIC STATS INCLUDED ===\n")
+basic_cols_to_check <- c("goals", "assists", "points", "plusMinus", "shots", "hits", 
+                        "blockedShots", "pim", "shootingPct", "faceoffWinPct", "timeOnIcePerGame")
+available_basic <- basic_cols_to_check[basic_cols_to_check %in% names(complete_nhl_dataset)]
+for (col in available_basic) cat("✅", col, "\n")
+
+# Show missing basic stats
+missing_basic <- basic_cols_to_check[!basic_cols_to_check %in% names(complete_nhl_dataset)]
+if (length(missing_basic) > 0) {
+  cat("\n=== BASIC STATS NOT AVAILABLE ===\n")
+  for (col in missing_basic) cat("❌", col, "\n")
+}
+
+cat("\n=== ADVANCED STATS INCLUDED ===\n")
+advanced_cols <- c("corsi_percentage", "fenwick_percentage", "corsi_relative", 
+                  "fenwick_relative", "zone_start_pct", "corsi_for", "fenwick_for")
+available_advanced <- advanced_cols[advanced_cols %in% names(complete_nhl_dataset)]
+for (col in available_advanced) cat("✅", col, "\n")
+
+# Show top performers in different categories
+cat("\n=== TOP 10 GOAL SCORERS ===\n")
+top_goals <- complete_nhl_dataset %>%
+  arrange(desc(goals)) %>%
+  select(skaterFullName, team_abbr, gamesPlayed, goals, assists, points, 
+         corsi_percentage, shootingPct) %>%
+  head(10)
+print(top_goals)
+
+cat("\n=== TOP 10 POINT PRODUCERS ===\n")
+top_points <- complete_nhl_dataset %>%
+  arrange(desc(points)) %>%
+  select(skaterFullName, team_abbr, gamesPlayed, goals, assists, points, 
+         points_per_game, corsi_percentage) %>%
+  head(10)
+print(top_points)
+
+cat("\n=== BEST POSSESSION + PRODUCTION COMBO ===\n")
+elite_combo <- complete_nhl_dataset %>%
+  filter(gamesPlayed >= 15, !is.na(corsi_percentage)) %>%
+  filter(corsi_percentage >= 50, points >= 15) %>%
+  arrange(desc(points)) %>%
+  select(skaterFullName, team_abbr, points, corsi_percentage, 
+         goals, assists, zone_start_pct) %>%
+  head(15)
+print(elite_combo)
+
+# Save the complete dataset
+write.csv(complete_nhl_dataset, "complete_nhl_dataset_2024_25.csv", row.names = FALSE)
+cat("\n💾 COMPLETE DATASET SAVED AS: complete_nhl_dataset_2024_25.csv\n")
+
+cat("\n🏒 YOU NOW HAVE THE ULTIMATE NHL DATASET! 🏒\n")
+cat("✅ Traditional stats: Goals, Assists, Points, +/-, PIM, Hits, etc.\n")
+cat("✅ Advanced stats: Corsi, Fenwick, Zone Starts, Relative metrics\n") 
+cat("✅ Calculated rates: Per game stats, plus/minus differentials\n")
+cat("✅ Ready for complete player analysis!\n")
+
+# Make it available in your environment
+cat("\nDataset available as 'complete_nhl_dataset' variable\n")
+```
+
+```{r}
+# =============================================================================
+# ADD EXPECTED GOALS DATA FROM MONEYPUCK
+# =============================================================================
+
+library(tidyverse)
+
+# =============================================================================
+# FUNCTION: Get MoneyPuck Expected Goals Data
+# =============================================================================
+
+get_moneypuck_xg_data <- function(season = "2024") {
+  cat("=== DOWNLOADING EXPECTED GOALS DATA FROM MONEYPUCK ===\n")
+  cat("Source: MoneyPuck.com - the gold standard for NHL xG data\n\n")
+  
+  # MoneyPuck URL for 2024-25 season skater data
+  url <- paste0("https://moneypuck.com/moneypuck/playerData/seasonSummary/", season, "/regular/skaters.csv")
+  
+  cat("Downloading from:", url, "\n")
+  cat("This may take a moment...\n")
+  
+  tryCatch({
+    # Download the CSV directly
+    moneypuck_data <- read.csv(url, stringsAsFactors = FALSE)
+    
+    cat("✅ SUCCESS! Downloaded", nrow(moneypuck_data), "players with", ncol(moneypuck_data), "columns\n")
+    
+    # Show what xG columns are available
+    xg_cols <- names(moneypuck_data)[grepl("xG|expected|Expected", names(moneypuck_data), ignore.case = TRUE)]
+    
+    cat("\n🎯 EXPECTED GOALS COLUMNS FOUND:\n")
+    for (col in xg_cols) {
+      cat("✅", col, "\n")
+    }
+    
+    # Show other interesting columns
+    cat("\n📊 OTHER ADVANCED COLUMNS AVAILABLE:\n")
+    other_advanced <- names(moneypuck_data)[grepl("Corsi|Fenwick|CF|CA|FF|FA|SCF|SCA|HDCF|HDCA", names(moneypuck_data))]
+    for (col in other_advanced) {
+      cat("✅", col, "\n") 
+    }
+    
+    cat("\n💡 Total columns available:", ncol(moneypuck_data), "\n")
+    
+    return(moneypuck_data)
+    
+  }, error = function(e) {
+    cat("❌ Failed to download MoneyPuck data:", e$message, "\n")
+    cat("This might be because:\n")
+    cat("1. 2024-25 season data isn't ready yet\n") 
+    cat("2. URL format changed\n")
+    cat("3. Network issues\n")
+    return(NULL)
+  })
+}
+
+# =============================================================================
+# DOWNLOAD MONEYPUCK DATA
+# =============================================================================
+
+moneypuck_xg_data <- get_moneypuck_xg_data("2024")
+
+# If 2024 doesn't work, try 2023 season as backup
+if (is.null(moneypuck_xg_data)) {
+  cat("\n2024-25 data not available, trying 2023-24 as backup...\n")
+  moneypuck_xg_data <- get_moneypuck_xg_data("2023")
+}
+
+# =============================================================================
+# EXAMINE THE MONEYPUCK DATA
+# =============================================================================
+
+if (!is.null(moneypuck_xg_data)) {
+  
+  cat("\n=== MONEYPUCK DATA STRUCTURE ===\n")
+  cat("Columns:\n")
+  print(names(moneypuck_xg_data))
+  
+  cat("\n=== SAMPLE OF XG DATA ===\n")
+  if ("name" %in% names(moneypuck_xg_data) && "xGoalsFor" %in% names(moneypuck_xg_data)) {
+    sample_xg <- moneypuck_xg_data %>%
+      arrange(desc(xGoalsFor)) %>%
+      select(name, team, games_played, xGoalsFor, xGoalsAgainst, goals, contains("xG")) %>%
+      head(10)
+    
+    print(sample_xg)
+  } else {
+    # Show first few columns to understand structure
+    print(head(moneypuck_xg_data[,1:10]))
+  }
+  
+  # =============================================================================
+  # MERGE WITH YOUR EXISTING NHL DATASET
+  # =============================================================================
+  
+  cat("\n=== MERGING XG DATA WITH YOUR NHL DATASET ===\n")
+  
+  # Check if we have existing complete dataset
+  if (exists("complete_nhl_dataset")) {
+    
+    cat("Found your NHL dataset with", nrow(complete_nhl_dataset), "players\n")
+    
+    # We need to match players between datasets
+    # MoneyPuck likely uses 'name' and your dataset uses 'skaterFullName'
+    
+    # Try to match by player name
+    if ("name" %in% names(moneypuck_xg_data) && "skaterFullName" %in% names(complete_nhl_dataset)) {
+      
+      # Clean player names for matching
+      moneypuck_clean <- moneypuck_xg_data %>%
+        mutate(
+          clean_name = str_trim(str_to_lower(name)),
+          moneypuck_team = team
+        ) %>%
+        # Select key xG columns
+        select(clean_name, moneypuck_team, contains("xGoals"), contains("xG"), 
+               contains("CF"), contains("CA"), contains("FF"), contains("FA"),
+               contains("SCF"), contains("SCA"), contains("HDCF"), contains("HDCA"))
+      
+      complete_with_xg <- complete_nhl_dataset %>%
+        mutate(clean_name = str_trim(str_to_lower(skaterFullName))) %>%
+        left_join(moneypuck_clean, by = "clean_name") %>%
+        select(-clean_name)  # Remove the matching column
+      
+      # Check how many matches we got
+      matches <- sum(!is.na(complete_with_xg$OnIce_F_xGoals), na.rm = TRUE)  # Use actual column name
+      cat("Successfully matched", matches, "players with xG data\n")
+      
+      if (matches > 100) {  # Reasonable threshold
+        cat("\n🎉 XG DATA SUCCESSFULLY ADDED! 🎉\n")
+        
+        # Show sample of combined data
+        cat("\n=== SAMPLE: BASIC + ADVANCED + XG STATS ===\n")
+        sample_combined <- complete_with_xg %>%
+          filter(!is.na(OnIce_F_xGoals)) %>%  # Use actual MoneyPuck column name
+          arrange(desc(points)) %>%
+          select(skaterFullName, team_abbr, goals, assists, points, 
+                 corsi_percentage, OnIce_F_xGoals, OnIce_A_xGoals, I_F_xGoals) %>%
+          head(10)
+        
+        print(sample_combined)
+        
+        # Save the ultimate dataset
+        write.csv(complete_with_xg, "complete_nhl_with_xg_2024_25.csv", row.names = FALSE)
+        
+        cat("\n💾 ULTIMATE DATASET SAVED AS: complete_nhl_with_xg_2024_25.csv\n")
+        cat("📊 Now includes:", ncol(complete_with_xg), "total columns\n")
+        cat("🏒 Basic stats + Advanced stats + Expected Goals!\n")
+        
+        # Update variable in environment
+        complete_nhl_dataset_with_xg <- complete_with_xg
+        
+      } else {
+        cat("❌ Poor matching - only", matches, "players matched\n")
+        cat("This might be due to name format differences\n")
+      }
+      
+    } else {
+      cat("❌ Can't find proper name columns for matching\n")
+      cat("MoneyPuck columns:", names(moneypuck_xg_data)[1:10], "\n")
+      cat("Your dataset columns:", names(complete_nhl_dataset)[1:10], "\n")
+    }
+    
+  } else {
+    cat("❌ No existing NHL dataset found to merge with\n")
+    cat("Make sure you've run the previous code to create 'complete_nhl_dataset'\n")
+  }
+  
+} else {
+  cat("❌ MoneyPuck data download failed\n")
+}
+
+# =============================================================================
+# EXPECTED GOALS EXPLANATION
+# =============================================================================
+
+cat("\n=== WHAT IS EXPECTED GOALS (XG)? ===\n")
+cat("📊 xG measures SHOT QUALITY, not just quantity\n")
+cat("🎯 xGoalsFor = Quality of shots your team takes when you're on ice\n")
+cat("🛡️  xGoalsAgainst = Quality of shots opponents get when you're on ice\n")
+cat("✨ Better than Corsi because it accounts for shot location/type/situation\n")
+cat("\n💡 GOOD XG NUMBERS:\n")
+cat("- xG For > xG Against (you create more danger than you allow)\n")
+cat("- Goals > xG = Getting lucky or elite finishing\n") 
+cat("- Goals < xG = Unlucky or poor finishing\n")
+cat("- xG/60 rates are often more useful than totals\n")
+
+if (exists("complete_nhl_dataset_with_xg")) {
+  cat("\n🎉 SUCCESS! You now have the ULTIMATE NHL analytics dataset:\n")
+  cat("✅ Traditional stats (goals, assists, +/-)\n")
+  cat("✅ Corsi & Fenwick (possession)\n") 
+  cat("✅ Expected Goals For & Against (shot quality)\n")
+  cat("✅ Zone starts, shot types, percentages\n")
+  cat("✅ Everything needed for elite NHL analytics!\n")
+}
+```
+
+```{r}
+# =============================================================================
+# CLEAN NHL DATASET - HANDLE TRADED PLAYERS PROPERLY
+# =============================================================================
+
+library(tidyverse)
+
+# Load the dataset
+nhl_data <- read.csv("C:/Users/timmy/Desktop/Hockey Doc/complete_nhl_with_xg_2024_25.csv")
+
+cat("=== ORIGINAL DATASET ANALYSIS ===\n")
+cat("Original rows:", nrow(nhl_data), "\n")
+cat("Original columns:", ncol(nhl_data), "\n")
+
+# =============================================================================
+# ANALYZE PLAYER ENTRIES (TRADES VS TRUE DUPLICATES)
+# =============================================================================
+
+cat("\n=== ANALYZING PLAYER ENTRIES ===\n")
+
+# Analyze players with multiple entries
+multi_entry_players <- nhl_data %>%
+  count(playerId) %>%
+  filter(n > 1) %>%
+  arrange(desc(n))
+
+cat("Players with multiple entries:", nrow(multi_entry_players), "\n")
+
+if (nrow(multi_entry_players) > 0) {
+  cat("Player with most entries has", max(multi_entry_players$n), "entries\n")
+  
+  # Analyze the nature of multiple entries
+  multi_entry_analysis <- nhl_data %>%
+    filter(playerId %in% multi_entry_players$playerId) %>%
+    group_by(playerId, skaterFullName) %>%
+    summarise(
+      entries = n(),
+      teams = n_distinct(team_abbr, na.rm = TRUE),
+      different_teams = paste(unique(team_abbr[!is.na(team_abbr)]), collapse = ", "),
+      total_games = sum(gamesPlayed, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    arrange(desc(entries))
+  
+  cat("\nSample multi-entry players:\n")
+  print(head(multi_entry_analysis))
+  
+  # Check if multiple entries are due to trades (different teams)
+  trade_players <- multi_entry_analysis %>%
+    filter(teams > 1)
+  
+  true_duplicates <- multi_entry_analysis %>%
+    filter(teams == 1)  # Same player, same team, multiple entries = true duplicate
+  
+  cat("\nPlayers traded (different teams):", nrow(trade_players), "\n")
+  cat("True duplicates (same team):", nrow(true_duplicates), "\n")
+}
+
+# =============================================================================
+# IDENTIFY AND HANDLE TRUE DUPLICATES (SAME PLAYER, SAME TEAM)
+# =============================================================================
+
+cat("\n=== HANDLING TRUE DUPLICATES ===\n")
+
+# Find true duplicates (same player ID + same team)
+true_duplicates_detailed <- nhl_data %>%
+  group_by(playerId, team_abbr) %>%
+  filter(n() > 1) %>%
+  ungroup()
+
+cat("True duplicate entries (same player + team):", nrow(true_duplicates_detailed), "\n")
+
+if (nrow(true_duplicates_detailed) > 0) {
+  cat("Sample true duplicates:\n")
+  sample_dupe <- true_duplicates_detailed %>%
+    arrange(playerId, team_abbr) %>%
+    select(playerId, skaterFullName, team_abbr, gamesPlayed, goals, points) %>%
+    head(10)
+  print(sample_dupe)
+}
+
+# Clean true duplicates by keeping the entry with more complete data
+nhl_cleaned <- nhl_data %>%
+  group_by(playerId, team_abbr) %>%
+  # For same player + team, keep entry with most games played, then most complete xG data
+  arrange(desc(gamesPlayed), desc(!is.na(OnIce_F_xGoals))) %>%
+  slice(1) %>%  # Keep best entry for each player-team combination
+  ungroup()
+
+cat("After removing true duplicates:", nrow(nhl_cleaned), "rows\n")
+cat("Rows removed:", nrow(nhl_data) - nrow(nhl_cleaned), "\n")
+
+# =============================================================================
+# CREATE INDIVIDUAL TEAM PERFORMANCE DATASET
+# =============================================================================
+
+cat("\n=== CREATING INDIVIDUAL TEAM PERFORMANCE DATASET ===\n")
+
+# This dataset keeps separate entries for each team a player played for
+nhl_by_team <- nhl_cleaned %>%
+  # Add some calculated fields specific to each team stint
+  mutate(
+    # Rate stats (per game with this team)
+    goals_per_game_team = ifelse(gamesPlayed > 0, goals / gamesPlayed, 0),
+    points_per_game_team = ifelse(gamesPlayed > 0, points / gamesPlayed, 0),
+    
+    # Identify likely trade candidates (players with multiple team entries)
+    playerId_team_count = ave(rep(1, nrow(.)), playerId, FUN = length),
+    traded_player = ifelse(playerId_team_count > 1, TRUE, FALSE)
+  ) %>%
+  # Filter to meaningful playing time
+  filter(gamesPlayed >= 1) %>%
+  arrange(playerId, team_abbr)
+
+cat("Individual team performances:", nrow(nhl_by_team), "\n")
+cat("Traded players:", sum(nhl_by_team$traded_player), "entries\n")
+cat("Players who were traded:", length(unique(nhl_by_team$playerId[nhl_by_team$traded_player])), "\n")
+
+# =============================================================================
+# CREATE SEASON TOTALS DATASET (AGGREGATE ACROSS TEAMS) - PRESERVE ALL VARIABLES
+# =============================================================================
+
+cat("\n=== CREATING SEASON TOTALS DATASET ===\n")
+
+# First, get a list of all numeric columns that should be summed
+numeric_cols_to_sum <- nhl_cleaned %>%
+  select_if(is.numeric) %>%
+  select(-playerId) %>%  # Don't sum the ID
+  names()
+
+# Get non-numeric columns that we want to preserve
+char_cols <- nhl_cleaned %>%
+  select_if(function(x) !is.numeric(x)) %>%
+  names()
+
+# Aggregate stats across all teams for each player's season total
+nhl_season_totals <- nhl_cleaned %>%
+  group_by(playerId, skaterFullName) %>%
+  summarise(
+    # Count teams played for
+    teams_played_for = n(),
+    team_list = paste(unique(team_abbr[!is.na(team_abbr)]), collapse = ", "),
+    
+    # Preserve character/factor variables (take first non-NA value)
+    across(all_of(char_cols[!char_cols %in% c("playerId", "skaterFullName", "team_abbr")]), 
+           ~first(.x[!is.na(.x)]), .names = "{.col}"),
+    
+    # Use the most recent/primary team info for team_abbr
+    team_abbr = last(team_abbr[!is.na(team_abbr)]),  # Last team
+    
+    # Sum ALL numeric columns automatically
+    across(all_of(numeric_cols_to_sum), ~sum(.x, na.rm = TRUE), .names = "{.col}"),
+    
+    .groups = "drop"
+  ) %>%
+  # Recalculate percentage/rate stats that need special handling
+  mutate(
+    # Shooting percentage
+    shootingPct = ifelse(shots > 0, goals / shots * 100, NA),
+    
+    # Time on ice per game (weighted average) - if this column exists
+    timeOnIcePerGame = ifelse(gamesPlayed > 0 & "timeOnIcePerGame" %in% names(nhl_cleaned),
+                             timeOnIcePerGame / teams_played_for, timeOnIcePerGame),
+    
+    # Corsi and Fenwick percentages
+    corsi_percentage = ifelse(corsi_for + corsi_against > 0, 
+                             corsi_for / (corsi_for + corsi_against) * 100, NA),
+    fenwick_percentage = ifelse(fenwick_for + fenwick_against > 0,
+                               fenwick_for / (fenwick_for + fenwick_against) * 100, NA),
+    
+    # xGoals percentage  
+    onIce_xGoalsPercentage = ifelse(OnIce_F_xGoals + OnIce_A_xGoals > 0,
+                                   OnIce_F_xGoals / (OnIce_F_xGoals + OnIce_A_xGoals) * 100, NA),
+    
+    # Add calculated analytics
+    goals_per_game = ifelse(gamesPlayed > 0, goals / gamesPlayed, 0),
+    points_per_game = ifelse(gamesPlayed > 0, points / gamesPlayed, 0),
+    xGoals_plus_minus = OnIce_F_xGoals - OnIce_A_xGoals,
+    goals_above_expected = goals - I_F_xGoals,
+    
+    # Mark traded players
+    traded_player = ifelse(teams_played_for > 1, TRUE, FALSE)
+  ) %>%
+  # Filter to meaningful playing time
+  filter(gamesPlayed >= 5) %>%
+  arrange(desc(points))
+
+cat("Season totals dataset:", nrow(nhl_season_totals), "\n")
+cat("Variables preserved:", ncol(nhl_season_totals), "\n")
+cat("Players who were traded:", sum(nhl_season_totals$traded_player), "\n")
+
+# =============================================================================
+# ALTERNATIVE METHOD: PRESERVE EVERY SINGLE VARIABLE EXPLICITLY
+# =============================================================================
+
+# Get ALL column names from original data
+all_original_cols <- names(nhl_cleaned)
+cat("Original dataset had", length(all_original_cols), "columns\n")
+
+# Create a more comprehensive aggregation that handles every column type
+nhl_season_totals_explicit <- nhl_cleaned %>%
+  group_by(playerId) %>%
+  summarise(
+    # Player info (take first values)
+    skaterFullName = first(skaterFullName[!is.na(skaterFullName)]),
+    
+    # Team info
+    teams_played_for = n(),
+    team_list = paste(unique(team_abbr[!is.na(team_abbr)]), collapse = ", "),
+    team_abbr = last(team_abbr[!is.na(team_abbr)]),  # Last team
+    
+    # Handle ALL other columns dynamically
+    across(everything(), 
+           ~if(is.numeric(.x) && !cur_column() %in% c("playerId")) {
+             sum(.x, na.rm = TRUE)
+           } else if (!cur_column() %in% c("playerId", "skaterFullName", "team_abbr")) {
+             first(.x[!is.na(.x)])
+           } else {
+             .x
+           }),
+    
+    .groups = "drop"
+  ) %>%
+  # Fix percentage stats and add calculated fields
+  mutate(
+    shootingPct = ifelse(shots > 0, goals / shots * 100, NA),
+    goals_per_game = ifelse(gamesPlayed > 0, goals / gamesPlayed, 0),
+    points_per_game = ifelse(gamesPlayed > 0, points / gamesPlayed, 0),
+    traded_player = ifelse(teams_played_for > 1, TRUE, FALSE)
+  ) %>%
+  filter(gamesPlayed >= 5) %>%
+  arrange(desc(points))
+
+# Use whichever method preserves more variables
+final_cols_method1 <- ncol(nhl_season_totals)
+final_cols_method2 <- ncol(nhl_season_totals_explicit)
+
+if (final_cols_method2 > final_cols_method1) {
+  nhl_season_totals <- nhl_season_totals_explicit
+  cat("Using explicit method - preserved", final_cols_method2, "variables\n")
+} else {
+  cat("Using first method - preserved", final_cols_method1, "variables\n")
+}
+
+# =============================================================================
+# CREATE ONE FINAL COMPREHENSIVE DATASET (KEEP ALL VARIABLES)
+# =============================================================================
+
+cat("\n=== CREATING FINAL COMPREHENSIVE DATASET ===\n")
+
+# Use the complete nhl_season_totals as the final dataset - NO select() to drop variables!
+nhl_final_comprehensive <- nhl_season_totals %>%
+  # Only filter for meaningful playing time - keep ALL variables
+  filter(gamesPlayed >= 5) %>%
+  arrange(desc(points))
+
+cat("Final comprehensive dataset:", nrow(nhl_final_comprehensive), "players\n")
+cat("ALL", ncol(nhl_final_comprehensive), "variables preserved!\n")
+
+# =============================================================================
+# SAVE FINAL DATASET
+# =============================================================================
+
+cat("\n=== SAVING FINAL DATASET ===\n")
+
+# Save the one comprehensive final dataset
+write.csv(nhl_final_comprehensive, "nhl_final_clean_2024_25.csv", row.names = FALSE)
+cat("💾 Final comprehensive dataset saved as: nhl_final_clean_2024_25.csv\n")
+
+# Optional: Also save the intermediate by-team version in case you need it later
+write.csv(nhl_by_team, "nhl_by_team_raw_2024_25.csv", row.names = FALSE)
+cat("💾 Raw by-team data also saved as: nhl_by_team_raw_2024_25.csv (for reference)\n")
+
+# =============================================================================
+# FINAL SUMMARY & VALIDATION
+# =============================================================================
+
+cat("\n=== FINAL DATASET SUMMARY ===\n")
+cat("Original entries:", nrow(nhl_data), "\n")
+cat("After removing true duplicates:", nrow(nhl_cleaned), "\n")
+cat("Final comprehensive dataset:", nrow(nhl_final_comprehensive), "players\n")
+cat("Variables preserved:", ncol(nhl_final_comprehensive), "\n")
+
+# Show some traded players as examples
+cat("\n=== SAMPLE TRADED PLAYERS ===\n")
+sample_trades <- nhl_final_comprehensive %>%
+  filter(traded_player == TRUE) %>%
+  arrange(desc(points)) %>%
+  select(skaterFullName, team_list, teams_played_for, gamesPlayed, goals, points) %>%
+  head(8)
+
+if (nrow(sample_trades) > 0) {
+  print(sample_trades)
+}
+
+# Show season leaders
+cat("\n=== TOP 10 POINT SCORERS (Season Totals) ===\n")
+top_scorers <- nhl_final_comprehensive %>%
+  arrange(desc(points)) %>%
+  select(skaterFullName, team_list, traded_player, gamesPlayed, goals, assists, points) %>%
+  head(10)
+print(top_scorers)
+
+# Show what variables are available
+cat("\n=== AVAILABLE VARIABLES ===\n")
+cat("Key variables in final dataset:\n")
+key_vars <- c("playerId", "skaterFullName", "team_abbr", "team_list", "teams_played_for", "traded_player",
+              "gamesPlayed", "goals", "assists", "points", "shots", "shootingPct", 
+              "corsi_percentage", "OnIce_F_xGoals", "I_F_xGoals", "goals_above_expected")
+available_vars <- intersect(key_vars, names(nhl_final_comprehensive))
+cat(paste(available_vars, collapse = ", "), "\n")
+cat("...and", ncol(nhl_final_comprehensive) - length(available_vars), "more variables\n")
+
+cat("\n=== USAGE ===\n")
+cat("📊 Use 'nhl_final_clean_2024_25.csv' for all your analyses\n")
+cat("📊 This dataset aggregates stats across trades for season totals\n") 
+cat("📊 'traded_player' column identifies who was traded\n")
+cat("📊 'team_list' shows all teams a player played for\n")
+
+cat("\n✅ SINGLE COMPREHENSIVE DATASET READY!\n")
+```
+
+```{r}
+# =============================================================================
+# CALCULATE XG LUCK METRIC - ALTERNATIVE TO PDO
+# Updated to work with trade-aware cleaned datasets
+# =============================================================================
+
+library(tidyverse)
+
+cat("=== CALCULATING XG LUCK METRICS ===\n")
+cat("Choose your analysis approach:\n")
+cat("1. Season totals (overall luck across all teams)\n")
+cat("2. By-team performance (luck with each specific team)\n")
+
+# =============================================================================
+# LOAD DATA - CHOOSE SEASON TOTALS OR BY-TEAM
+# =============================================================================
+
+# Use the final comprehensive dataset
+if (file.exists("nhl_final_clean_2024_25.csv")) {
+  nhl_data <- read.csv("nhl_final_clean_2024_25.csv")
+  analysis_type <- "Season Totals"
+  cat("Using final comprehensive dataset for overall luck analysis\n")
+} else {
+  cat("ERROR: nhl_final_clean_2024_25.csv not found. Run the cleaning script first.\n")
+  stop("Missing input file")
+}
+
+cat("Dataset loaded:", nrow(nhl_data), "entries\n")
+
+# =============================================================================
+# XG LUCK CALCULATIONS
+# =============================================================================
+
+nhl_with_luck <- nhl_data %>%
+  mutate(
+    # Individual luck (your personal shooting)
+    individual_shooting_luck = ifelse(
+      !is.na(I_F_xGoals) & !is.na(goals) & I_F_xGoals > 0,
+      goals - I_F_xGoals,
+      NA_real_
+    ),
+    
+    # Team offensive luck when you're on ice (teammates' shooting)
+    team_offensive_luck = ifelse(
+      !is.na(OnIce_F_xGoals) & !is.na(I_F_xGoals) & I_F_xGoals > 0,
+      OnIce_F_xGoals - I_F_xGoals,  # Team xG when you're on ice minus your individual xG
+      NA_real_
+    ),
+    
+    # Overall team luck differential when you're on ice
+    overall_team_luck = ifelse(
+      !is.na(OnIce_F_xGoals) & !is.na(OnIce_A_xGoals),
+      (OnIce_F_xGoals - OnIce_A_xGoals), # Net xG when you're on ice
+      NA_real_
+    ),
+    
+    # Shooting efficiency compared to expectation
+    shooting_efficiency = ifelse(
+      !is.na(I_F_xGoals) & I_F_xGoals > 0,
+      goals / I_F_xGoals,
+      NA_real_
+    ),
+    
+    # xG percentage (similar to Corsi%)
+    xG_percentage = ifelse(
+      !is.na(OnIce_F_xGoals) & !is.na(OnIce_A_xGoals) & (OnIce_F_xGoals + OnIce_A_xGoals) > 0,
+      OnIce_F_xGoals / (OnIce_F_xGoals + OnIce_A_xGoals) * 100,
+      NA_real_
+    ),
+    
+    # For season totals, add per-game rates
+    individual_shooting_luck_per_game = ifelse(
+      gamesPlayed > 0 & !is.na(individual_shooting_luck),
+      individual_shooting_luck / gamesPlayed,
+      NA_real_
+    ),
+    
+    # Trade impact for traded players (only relevant if using season totals)
+    trade_impact_available = ifelse(
+      exists("traded_player", where = nhl_data) & exists("teams_played_for", where = nhl_data),
+      TRUE, FALSE
+    ),
+    
+    # Luck categories for individual shooting
+    individual_luck_category = case_when(
+      is.na(individual_shooting_luck) ~ "No Data",
+      individual_shooting_luck >= 3 ~ "Very Lucky",
+      individual_shooting_luck >= 1.5 ~ "Lucky", 
+      individual_shooting_luck <= -3 ~ "Very Unlucky",
+      individual_shooting_luck <= -1.5 ~ "Unlucky",
+      TRUE ~ "Normal"
+    ),
+    
+    # Shooting efficiency categories
+    shooting_efficiency_category = case_when(
+      is.na(shooting_efficiency) ~ "No Data",
+      shooting_efficiency >= 1.3 ~ "Hot Shooter",
+      shooting_efficiency >= 1.1 ~ "Above Average",
+      shooting_efficiency <= 0.7 ~ "Cold Shooter", 
+      shooting_efficiency <= 0.9 ~ "Below Average",
+      TRUE ~ "Average"
+    ),
+    
+    # Binary indicators
+    hot_shooter = ifelse(!is.na(shooting_efficiency) & shooting_efficiency >= 1.2, 1, 0),
+    cold_shooter = ifelse(!is.na(shooting_efficiency) & shooting_efficiency <= 0.8, 1, 0),
+    lucky_individual = ifelse(!is.na(individual_shooting_luck) & individual_shooting_luck >= 2, 1, 0),
+    unlucky_individual = ifelse(!is.na(individual_shooting_luck) & individual_shooting_luck <= -2, 1, 0)
+  )
+
+# =============================================================================
+# ANALYZE THE LUCK METRICS
+# =============================================================================
+
+cat("\n=== LUCK METRIC RESULTS (", analysis_type, ") ===\n")
+
+# Check how many players have luck data
+players_with_luck <- sum(!is.na(nhl_with_luck$individual_shooting_luck))
+cat("Players with individual shooting luck data:", players_with_luck, "\n")
+
+# Adjust minimum games filter based on analysis type
+min_games <- ifelse(analysis_type == "Season Totals", 10, 5)
+cat("Using minimum", min_games, "games for analysis\n")
+
+if (players_with_luck > 50) {
+  
+  # Show ranges
+  cat("\nLuck metric ranges:\n")
+  cat("Individual shooting luck:", 
+      round(min(nhl_with_luck$individual_shooting_luck, na.rm=T), 2), 
+      "to", round(max(nhl_with_luck$individual_shooting_luck, na.rm=T), 2), "\n")
+  cat("Shooting efficiency:", 
+      round(min(nhl_with_luck$shooting_efficiency, na.rm=T), 2), 
+      "to", round(max(nhl_with_luck$shooting_efficiency, na.rm=T), 2), "\n")
+  
+  # Show distribution
+  cat("\n=== INDIVIDUAL SHOOTING LUCK DISTRIBUTION ===\n")
+  luck_distribution <- nhl_with_luck %>%
+    filter(!is.na(individual_shooting_luck), gamesPlayed >= min_games) %>%
+    count(individual_luck_category) %>%
+    arrange(desc(n))
+  print(luck_distribution)
+  
+  # Determine which columns to show based on dataset type
+  display_cols <- c("skaterFullName", "team_abbr", "goals", "I_F_xGoals", "individual_shooting_luck", 
+                   "shooting_efficiency")
+  
+  # Add trade info if available
+  if ("traded_player" %in% names(nhl_with_luck)) {
+    display_cols <- c(display_cols, "traded_player")
+  }
+  if ("team_list" %in% names(nhl_with_luck)) {
+    display_cols <- c(display_cols[1], "team_list", display_cols[-1])
+    display_cols <- display_cols[display_cols != "team_abbr"]  # Remove single team if we have team_list
+  }
+  
+  # Show luckiest shooters
+  cat("\n=== LUCKIEST SHOOTERS (Goals > Expected) ===\n")
+  luckiest_shooters <- nhl_with_luck %>%
+    filter(!is.na(individual_shooting_luck), gamesPlayed >= min_games) %>%
+    arrange(desc(individual_shooting_luck)) %>%
+    select(any_of(display_cols)) %>%
+    head(10)
+  print(luckiest_shooters)
+  
+  # Show unluckiest shooters
+  cat("\n=== UNLUCKIEST SHOOTERS (Goals < Expected) ===\n")
+  unluckiest_shooters <- nhl_with_luck %>%
+    filter(!is.na(individual_shooting_luck), gamesPlayed >= min_games) %>%
+    arrange(individual_shooting_luck) %>%
+    select(any_of(display_cols)) %>%
+    head(10)
+  print(unluckiest_shooters)
+  
+  # Show hot vs cold shooters by efficiency
+  cat("\n=== HOT SHOOTERS (Efficiency > 1.2) ===\n")
+  hot_shooters <- nhl_with_luck %>%
+    filter(!is.na(shooting_efficiency), gamesPlayed >= min_games, shooting_efficiency >= 1.2) %>%
+    arrange(desc(shooting_efficiency)) %>%
+    select(any_of(c(display_cols, "shootingPct"))) %>%
+    head(10)
+  print(hot_shooters)
+  
+  cat("\n=== COLD SHOOTERS (Efficiency < 0.8) ===\n") 
+  cold_shooters <- nhl_with_luck %>%
+    filter(!is.na(shooting_efficiency), gamesPlayed >= min_games, shooting_efficiency <= 0.8) %>%
+    arrange(shooting_efficiency) %>%
+    select(any_of(c(display_cols, "shootingPct"))) %>%
+    head(10)
+  print(cold_shooters)
+
+} else {
+  cat("Not enough players with luck data to analyze\n")
+}
+
+# =============================================================================
+# TRADED PLAYER LUCK ANALYSIS (if using season totals)
+# =============================================================================
+
+if ("traded_player" %in% names(nhl_with_luck) && analysis_type == "Season Totals") {
+  cat("\n=== TRADED PLAYER LUCK ANALYSIS ===\n")
+  
+  traded_luck <- nhl_with_luck %>%
+    filter(!is.na(individual_shooting_luck), gamesPlayed >= 15) %>%
+    group_by(traded_player) %>%
+    summarise(
+      count = n(),
+      avg_luck = mean(individual_shooting_luck, na.rm = TRUE),
+      avg_efficiency = mean(shooting_efficiency, na.rm = TRUE),
+      .groups = "drop"
+    )
+  
+  print(traded_luck)
+  
+  # Show most interesting traded players
+  cat("\n=== NOTABLE TRADED PLAYERS (Luck Perspective) ===\n")
+  notable_trades <- nhl_with_luck %>%
+    filter(traded_player == TRUE, gamesPlayed >= 15, !is.na(individual_shooting_luck)) %>%
+    arrange(desc(abs(individual_shooting_luck))) %>%
+    select(skaterFullName, team_list, teams_played_for, goals, I_F_xGoals, 
+           individual_shooting_luck, shooting_efficiency) %>%
+    head(8)
+  print(notable_trades)
+}
+
+# =============================================================================
+# IDENTIFY REGRESSION CANDIDATES
+# =============================================================================
+
+cat("\n=== REGRESSION CANDIDATES ===\n")
+
+if (players_with_luck > 50) {
+  
+  # Players likely to improve (unlucky + good process)
+  cat("\n=== BUY-LOW CANDIDATES (Unlucky but good metrics) ===\n")
+  buy_low <- nhl_with_luck %>%
+    filter(
+      gamesPlayed >= min_games + 5,  # Slightly higher threshold for regression analysis
+      !is.na(individual_shooting_luck), 
+      !is.na(corsi_percentage),
+      individual_shooting_luck <= -1.5,  # Unlucky
+      corsi_percentage >= 50              # Good possession
+    ) %>%
+    arrange(individual_shooting_luck)
+  
+  if (nrow(buy_low) > 0) {
+    buy_low_display <- buy_low %>%
+      select(any_of(c(display_cols, "corsi_percentage", "points"))) %>%
+      head(10)
+    print(buy_low_display)
+    cat("These players have good possession but are scoring fewer goals than expected\n")
+  } else {
+    cat("No clear buy-low candidates found\n")
+  }
+  
+  # Players likely to regress (lucky + poor process)  
+  cat("\n=== SELL-HIGH CANDIDATES (Lucky but poor metrics) ===\n")
+  sell_high <- nhl_with_luck %>%
+    filter(
+      gamesPlayed >= min_games + 5,
+      !is.na(individual_shooting_luck),
+      !is.na(corsi_percentage), 
+      individual_shooting_luck >= 1.5,   # Lucky
+      corsi_percentage <= 48             # Poor possession
+    ) %>%
+    arrange(desc(individual_shooting_luck))
+  
+  if (nrow(sell_high) > 0) {
+    sell_high_display <- sell_high %>%
+      select(any_of(c(display_cols, "corsi_percentage", "points"))) %>%
+      head(10)
+    print(sell_high_display)
+    cat("These players are scoring more than expected but have poor possession\n")
+  } else {
+    cat("No clear sell-high candidates found\n")
+  }
+}
+
+# =============================================================================
+# SAVE DATASET WITH LUCK METRICS
+# =============================================================================
+
+output_filename <- "nhl_final_with_luck_2024_25.csv"
+
+write.csv(nhl_with_luck, output_filename, row.names = FALSE)
+
+cat("\n=== SUMMARY ===\n")
+cat("Dataset with luck metrics saved as:", output_filename, "\n")
+cat("Analysis type:", analysis_type, "\n")
+cat("Total rows:", nrow(nhl_with_luck), "\n")
+cat("New luck variables added:\n")
+cat("- individual_shooting_luck (goals - expected goals)\n")
+cat("- shooting_efficiency (goals / expected goals ratio)\n") 
+cat("- xG_percentage (xG version of Corsi%)\n")
+cat("- team_offensive_luck (teammates' shooting luck when you're on ice)\n")
+cat("- Luck categories and binary indicators\n")
+
+if (analysis_type == "Season Totals") {
+  cat("- individual_shooting_luck_per_game (luck rate)\n")
+  cat("- Trade impact analysis included\n")
+}
+
+cat("\n=== INTERPRETATION GUIDE ===\n")
+cat("Individual Shooting Luck:\n")
+cat("  +3.0+ = Very lucky (scoring way more than expected)\n")
+cat("  +1.5 to +3.0 = Lucky\n") 
+cat("  -1.5 to +1.5 = Normal\n")
+cat("  -1.5 to -3.0 = Unlucky\n")
+cat("  -3.0+ = Very unlucky\n")
+
+cat("\nShooting Efficiency:\n")
+cat("  1.3+ = Hot shooter (30%+ above expectation)\n")
+cat("  1.1-1.3 = Above average\n")
+cat("  0.9-1.1 = Average\n") 
+cat("  0.7-0.9 = Below average\n")
+cat("  <0.7 = Cold shooter\n")
+
+if (analysis_type == "Season Totals") {
+  cat("\n=== OPTION: Run on By-Team Data ===\n")
+  cat("To analyze luck by individual team stints, run this script with:\n")
+  cat("nhl_data <- read.csv('nhl_by_team_2024_25.csv')\n")
+  cat("This shows how lucky/unlucky players were with each specific team\n")
+}
+
+cat("\nFinal dataset variable: 'nhl_with_luck'\n")
+```

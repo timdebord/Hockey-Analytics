@@ -1,0 +1,755 @@
+---
+title: "Hockey Analysis"
+author: "Timothy DeBord"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Start fresh in new RMD file
+library(tidyverse)
+
+# Load your complete dataset
+clean_dataset <- read.csv("C:/Users/timmy/Desktop/Hockey Doc/nhl_clean_complete_2024_25.csv")
+focused_dataset <- read.csv("C:/Users/timmy/Desktop/Hockey Doc/nhl_analytics_focused_2024_25.csv")
+nhl_data <- read.csv("C:/Users/timmy/Desktop/Hockey Doc/nhl_complete_with_luck_metrics_2024_25.csv")
+```
+
+```{r}
+# =============================================================================
+# COMPOSITE SCORE ANALYSIS - ENHANCED WITH MORE METRICS
+# =============================================================================
+
+library(tidyverse)
+library(ggplot2)
+
+# Load your dataset with luck metrics
+nhl_data <- read.csv("nhl_final_with_luck_2024_25.csv")
+
+cat("=== CREATING ENHANCED COMPOSITE SCORE ===\n")
+
+# =============================================================================
+# EXAMINE DATA VALUES FIRST
+# =============================================================================
+
+cat("=== EXAMINING DATA VALUES ===\n")
+cat("Total rows:", nrow(nhl_data), "\n")
+
+# Check position codes
+cat("Position codes:\n")
+print(table(nhl_data$positionCode, useNA = "ifany"))
+
+# Check games played distribution
+cat("Games played range:", min(nhl_data$gamesPlayed, na.rm = TRUE), 
+    "to", max(nhl_data$gamesPlayed, na.rm = TRUE), "\n")
+
+# Check all the metrics we'll use
+cat("Fenwick percentage summary:\n")
+print(summary(nhl_data$fenwick_percentage))
+
+cat("xG percentage summary:\n")
+print(summary(nhl_data$xG_percentage))
+
+cat("Zone start percentage summary:\n")
+print(summary(nhl_data$zone_start_pct))
+
+cat("5v5 shooting percentage summary:\n")
+print(summary(nhl_data$shooting_pct_5v5))
+
+cat("5v5 save percentage summary:\n")
+print(summary(nhl_data$save_pct_5v5))
+
+cat("Individual xGoals (I_F_xGoals) summary:\n")
+print(summary(nhl_data$I_F_xGoals))
+
+cat("Corsi relative summary:\n")
+print(summary(nhl_data$corsi_relative))
+
+# Count NAs in key columns
+cat("NAs in key columns:\n")
+cat("fenwick_percentage NAs:", sum(is.na(nhl_data$fenwick_percentage)), "\n")
+cat("xG_percentage NAs:", sum(is.na(nhl_data$xG_percentage)), "\n")
+cat("I_F_xGoals NAs:", sum(is.na(nhl_data$I_F_xGoals)), "\n")
+cat("zone_start_pct NAs:", sum(is.na(nhl_data$zone_start_pct)), "\n")
+cat("shooting_pct_5v5 NAs:", sum(is.na(nhl_data$shooting_pct_5v5)), "\n")
+cat("save_pct_5v5 NAs:", sum(is.na(nhl_data$save_pct_5v5)), "\n")
+cat("corsi_relative NAs:", sum(is.na(nhl_data$corsi_relative)), "\n")
+
+# =============================================================================
+# CALCULATE ENHANCED COMPOSITE SCORE
+# =============================================================================
+
+nhl_composite <- nhl_data %>%
+  # Filter out goalies and players with insufficient data
+  filter(
+    !is.na(positionCode),     # Remove rows with missing position
+    positionCode != "G",      # Remove goalies
+    gamesPlayed >= 15,        # Minimum games for reliable stats
+    !is.na(fenwick_percentage),
+    !is.na(xG_percentage)
+  ) %>%
+  mutate(
+    # Convert to same scale: Fenwick is 0.XX format, xG is already XX.XX format
+    fenwick_pct = fenwick_percentage * 100,  # Convert 0.49 to 49.0
+    xG_pct = xG_percentage,  # Already in XX.XX format (like 66.23)
+    
+    # Handle missing values for additional metrics by using median values
+    zone_start_pct_clean = ifelse(is.na(zone_start_pct), 50, zone_start_pct), # Default to neutral
+    shooting_pct_5v5_clean = ifelse(is.na(shooting_pct_5v5), 8, shooting_pct_5v5), # League average ~8%
+    save_pct_5v5_clean = ifelse(is.na(save_pct_5v5), 92, save_pct_5v5), # League average ~92%
+    corsi_relative_clean = ifelse(is.na(corsi_relative), 0, corsi_relative), # Default to neutral
+    
+    # Individual expected goals per game (volume metric)
+    individual_xG_per_game = ifelse(is.na(I_F_xGoals) | gamesPlayed == 0, 
+                                    0.5, I_F_xGoals / gamesPlayed), # Default to ~0.5 xG/game
+    
+    # Original Simple Composite Score: Fenwick% (50%) + xG% (50%)
+    composite_score = (fenwick_pct * 0.5) + (xG_pct * 0.5),
+    
+    # ENHANCED Composite Score with more metrics (including individual xG)
+    composite_enhanced = (
+      fenwick_pct * 0.20 +                    # Shot volume control (20%)
+      xG_pct * 0.20 +                         # Shot quality control (20%)
+      individual_xG_per_game * 20 * 0.20 +    # Individual offensive creation (20%) - scale up per game
+      zone_start_pct_clean * 0.15 +           # Zone start context (15%)
+      shooting_pct_5v5_clean * 0.15 +         # Finishing ability (15%)
+      save_pct_5v5_clean * 0.05 +             # Defensive impact (5%)
+      (corsi_relative_clean + 10) * 0.05      # Relative possession impact (5%) - add 10 to make positive
+    ),
+    
+    # Alternative enhanced versions for comparison
+    composite_enhanced_offense = (
+      fenwick_pct * 0.15 +                    
+      xG_pct * 0.20 +                         
+      individual_xG_per_game * 20 * 0.30 +    # More weight on individual creation
+      zone_start_pct_clean * 0.10 +           
+      shooting_pct_5v5_clean * 0.20 +         # More weight on scoring
+      save_pct_5v5_clean * 0.03 +             
+      (corsi_relative_clean + 10) * 0.02      
+    ),
+    
+    composite_enhanced_defense = (
+      fenwick_pct * 0.15 +                    
+      xG_pct * 0.15 +                         
+      individual_xG_per_game * 20 * 0.10 +    # Less weight on individual offense
+      zone_start_pct_clean * 0.25 +           # More weight on tough usage
+      shooting_pct_5v5_clean * 0.10 +         
+      save_pct_5v5_clean * 0.20 +             # More weight on defense
+      (corsi_relative_clean + 10) * 0.05      
+    ),
+    
+    # Position grouping
+    position_group = case_when(
+      positionCode == "C" ~ "C",
+      positionCode == "L" ~ "LW",  
+      positionCode == "R" ~ "RW",  
+      positionCode == "D" ~ "D",
+      TRUE ~ "Other"
+    )
+  ) %>%
+  # Remove players with extreme outliers
+  filter(
+    fenwick_pct >= 30, fenwick_pct <= 70,  # Reasonable Fenwick range
+    xG_pct >= 30, xG_pct <= 70             # Reasonable xG range
+  )
+
+cat("Players included in analysis after filtering:", nrow(nhl_composite), "\n")
+cat("Original composite score range:", round(min(nhl_composite$composite_score), 1), 
+    "to", round(max(nhl_composite$composite_score), 1), "\n")
+cat("Enhanced composite score range:", round(min(nhl_composite$composite_enhanced), 1), 
+    "to", round(max(nhl_composite$composite_enhanced), 1), "\n")
+
+# Check position distribution
+cat("\n=== POSITION DISTRIBUTION ===\n")
+position_counts <- nhl_composite %>%
+  count(position_group) %>%
+  arrange(desc(n))
+print(position_counts)
+
+# =============================================================================
+# COMPARE ORIGINAL VS ENHANCED SCORES
+# =============================================================================
+
+cat("\n=== CORRELATION BETWEEN SCORING METHODS ===\n")
+correlation_matrix <- nhl_composite %>%
+  select(composite_score, composite_enhanced, composite_enhanced_offense, composite_enhanced_defense) %>%
+  cor(use = "complete.obs")
+
+print(round(correlation_matrix, 3))
+
+# =============================================================================
+# GET TOP 30 BY POSITION (BOTH SCORING METHODS)
+# =============================================================================
+
+cat("\n=== TOP PLAYERS BY ENHANCED COMPOSITE SCORE ===\n")
+
+get_top_by_position_enhanced <- function(data, position, n = 30) {
+  data %>%
+    filter(position_group == position) %>%
+    arrange(desc(composite_enhanced)) %>%
+    head(n) %>%
+    mutate(enhanced_rank = row_number()) %>%
+    # Also get their original ranking for comparison
+    left_join(
+      data %>%
+        filter(position_group == position) %>%
+        arrange(desc(composite_score)) %>%
+        mutate(original_rank = row_number()) %>%
+        select(skaterFullName, original_rank),
+      by = "skaterFullName"
+    ) %>%
+    mutate(rank_change = original_rank - enhanced_rank)
+}
+
+# Get top 30 for each position using enhanced score
+top_centers_enh <- get_top_by_position_enhanced(nhl_composite, "C", 30)
+top_left_wings_enh <- get_top_by_position_enhanced(nhl_composite, "LW", 30)  
+top_right_wings_enh <- get_top_by_position_enhanced(nhl_composite, "RW", 30)
+top_defensemen_enh <- get_top_by_position_enhanced(nhl_composite, "D", 30)
+
+# Display top 10 for each position with comparison to original ranking
+cat("\nTOP 10 CENTERS (Enhanced Score):\n")
+print(top_centers_enh %>% 
+  select(enhanced_rank, skaterFullName, team_abbr, composite_enhanced, composite_score, 
+         rank_change, individual_xG_per_game, goals, points, zone_start_pct_clean) %>% 
+  head(10))
+
+cat("\nTOP 10 LEFT WINGS (Enhanced Score):\n")
+print(top_left_wings_enh %>% 
+  select(enhanced_rank, skaterFullName, team_abbr, composite_enhanced, composite_score, 
+         rank_change, individual_xG_per_game, goals, points, zone_start_pct_clean) %>% 
+  head(10))
+
+cat("\nTOP 10 RIGHT WINGS (Enhanced Score):\n")
+print(top_right_wings_enh %>% 
+  select(enhanced_rank, skaterFullName, team_abbr, composite_enhanced, composite_score, 
+         rank_change, individual_xG_per_game, goals, points, zone_start_pct_clean) %>% 
+  head(10))
+
+cat("\nTOP 10 DEFENSEMEN (Enhanced Score):\n")
+print(top_defensemen_enh %>% 
+  select(enhanced_rank, skaterFullName, team_abbr, composite_enhanced, composite_score, 
+         rank_change, individual_xG_per_game, goals, points, zone_start_pct_clean) %>% 
+  head(10))
+
+# =============================================================================
+# BIGGEST MOVERS (Players who changed most in rankings)
+# =============================================================================
+
+cat("\n=== BIGGEST MOVERS FROM ORIGINAL TO ENHANCED RANKING ===\n")
+
+all_players_comparison <- bind_rows(
+  top_centers_enh %>% mutate(position_full = "Centers"),
+  top_left_wings_enh %>% mutate(position_full = "Left Wings"),
+  top_right_wings_enh %>% mutate(position_full = "Right Wings"), 
+  top_defensemen_enh %>% mutate(position_full = "Defensemen")
+)
+
+# Biggest positive movers (enhanced ranking better than original)
+cat("\nBIGGEST POSITIVE MOVERS (Enhanced system ranks them higher):\n")
+positive_movers <- all_players_comparison %>%
+  filter(rank_change > 0) %>%
+  arrange(desc(rank_change)) %>%
+  head(10) %>%
+  select(skaterFullName, position_full, enhanced_rank, original_rank, rank_change, 
+         composite_enhanced, individual_xG_per_game, zone_start_pct_clean, shooting_pct_5v5_clean)
+print(positive_movers)
+
+# Biggest negative movers (enhanced ranking worse than original)
+cat("\nBIGGEST NEGATIVE MOVERS (Enhanced system ranks them lower):\n")
+negative_movers <- all_players_comparison %>%
+  filter(rank_change < 0) %>%
+  arrange(rank_change) %>%
+  head(10) %>%
+  select(skaterFullName, position_full, enhanced_rank, original_rank, rank_change, 
+         composite_enhanced, individual_xG_per_game, zone_start_pct_clean, shooting_pct_5v5_clean)
+print(negative_movers)
+
+# =============================================================================
+# CREATE ENHANCED VISUALIZATIONS
+# =============================================================================
+
+cat("\n=== CREATING ENHANCED POSITION CHARTS ===\n")
+
+if(nrow(nhl_composite) > 0) {
+  
+  # Chart 1: Enhanced vs Original Composite Score Comparison
+  comparison_chart <- ggplot(all_players_comparison, aes(x = composite_score, y = composite_enhanced, color = position_full)) +
+    geom_point(size = 2, alpha = 0.7) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray") +
+    labs(
+      title = "Enhanced vs Original Composite Score",
+      subtitle = "Points above line = Enhanced system ranks higher",
+      x = "Original Composite Score (Fenwick% + xG%)",
+      y = "Enhanced Composite Score (6 metrics weighted)",
+      color = "Position"
+    ) +
+    theme_minimal() +
+    facet_wrap(~ position_full)
+
+  print(comparison_chart)
+
+  # Chart 2: Top 15 Overall Enhanced Composite Score
+  top_overall_enh <- nhl_composite %>%
+    arrange(desc(composite_enhanced)) %>%
+    head(15)
+
+  overall_enhanced_chart <- ggplot(top_overall_enh, aes(x = reorder(skaterFullName, composite_enhanced), 
+                                                        y = composite_enhanced, fill = position_group)) +
+    geom_col() +
+    coord_flip() +
+    labs(
+      title = "Top 15 NHL Players - Enhanced Composite Score",
+      subtitle = "Weighted: Fenwick%/xG%/Individual xG (20% each) + Zone Start% (15%) + Shooting% (15%) + Save%/Corsi Rel (5% each)",
+      x = "Player",
+      y = "Enhanced Composite Score",
+      fill = "Position"
+    ) +
+    theme_minimal()
+
+  print(overall_enhanced_chart)
+  
+  # Chart 3: Rank Change Visualization
+  rank_change_chart <- ggplot(all_players_comparison %>% head(50), 
+                             aes(x = original_rank, y = enhanced_rank, color = position_full, size = abs(rank_change))) +
+    geom_point(alpha = 0.7) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray") +
+    labs(
+      title = "Ranking Changes: Original vs Enhanced System",
+      subtitle = "Points below line = Enhanced system ranks higher • Size = magnitude of change",
+      x = "Original Ranking (within position)",
+      y = "Enhanced Ranking (within position)",
+      color = "Position",
+      size = "Rank Change"
+    ) +
+    theme_minimal() +
+    facet_wrap(~ position_full)
+
+  print(rank_change_chart)
+}
+
+# =============================================================================
+# SUMMARY STATISTICS
+# =============================================================================
+
+cat("\n=== ENHANCED COMPOSITE SCORE SUMMARY ===\n")
+cat("The enhanced composite score includes:\n")
+cat("• Fenwick Percentage (20%) - Shot volume control\n")
+cat("• xG Percentage (20%) - Shot quality control\n") 
+cat("• Individual xG per Game (20%) - Personal offensive creation\n")
+cat("• Zone Start Percentage (15%) - Usage context\n")
+cat("• 5v5 Shooting Percentage (15%) - Finishing ability\n")
+cat("• 5v5 Save Percentage (5%) - Defensive impact when on ice\n")
+cat("• Corsi Relative (5%) - Relative possession impact vs teammates\n")
+
+cat("\nMissing values were filled with league-average estimates:\n")
+cat("• Zone Start %: 50% (neutral)\n")
+cat("• Shooting %: 8% (league average)\n")
+cat("• Save %: 92% (league average)\n") 
+cat("• Corsi Relative: 0 (neutral)\n")
+
+cat(paste("\nEnhanced system analyzed", nrow(nhl_composite), "qualified players\n"))
+cat(paste("Average rank change magnitude:", round(mean(abs(all_players_comparison$rank_change), na.rm = TRUE), 1), "positions\n"))
+
+# Show correlation with actual performance
+if("points" %in% colnames(nhl_composite)) {
+  original_correlation <- cor(nhl_composite$composite_score, nhl_composite$points, use = "complete.obs")
+  enhanced_correlation <- cor(nhl_composite$composite_enhanced, nhl_composite$points, use = "complete.obs")
+  
+  cat("\n=== VALIDATION AGAINST ACTUAL POINTS ===\n")
+  cat("Original composite correlation with points:", round(original_correlation, 3), "\n")
+  cat("Enhanced composite correlation with points:", round(enhanced_correlation, 3), "\n")
+  
+  if(enhanced_correlation > original_correlation) {
+    cat("✓ Enhanced system shows stronger correlation with actual performance!\n")
+  } else {
+    cat("⚠ Original system still shows stronger correlation\n")
+  }
+}
+```
+
+```{r}
+# =============================================================================
+# ADVANCED STATS GAR MODEL - xG, FENWICK, ZONE STARTS, LUCK ADJUSTED
+# =============================================================================
+
+library(tidyverse)
+library(ggplot2)
+
+# Load your dataset
+nhl_data <- read.csv("nhl_complete_with_luck_metrics_2024_25.csv")
+
+cat("=== BUILDING ADVANCED STATS GAR MODEL ===\n")
+cat("Using: Individual xG, On-Ice xG, Fenwick, Zone Starts, Luck Metrics\n")
+
+# =============================================================================
+# DEFINE REPLACEMENT LEVEL (ADVANCED STATS)
+# =============================================================================
+
+replacement_stats <- nhl_data %>%
+  filter(
+    !is.na(positionCode),
+    positionCode != "G", 
+    gamesPlayed >= 15
+  ) %>%
+  summarise(
+    # Individual offensive creation (20th percentile)
+    replacement_individual_xG_rate = quantile(I_F_xGoals / gamesPlayed, 0.20, na.rm = TRUE),
+    
+    # On-ice team performance while player is on ice (rates)
+    replacement_onice_xGF_rate = quantile(OnIce_F_xGoals / gamesPlayed, 0.20, na.rm = TRUE),
+    replacement_onice_xGA_rate = quantile(OnIce_A_xGoals / gamesPlayed, 0.80, na.rm = TRUE), # 80th percentile = bad defense
+    
+    # Possession and control metrics
+    replacement_fenwick_pct = quantile(fenwick_percentage, 0.20, na.rm = TRUE),
+    replacement_xG_pct = quantile(xG_percentage, 0.20, na.rm = TRUE),
+    
+    # Usage context
+    neutral_zone_start = 50.0, # Neutral usage
+    
+    .groups = "drop"
+  )
+
+cat("=== REPLACEMENT LEVEL BASELINES (ADVANCED STATS) ===\n")
+print(replacement_stats)
+
+# =============================================================================
+# ADVANCED GAR CALCULATIONS
+# =============================================================================
+
+nhl_gar <- nhl_data %>%
+  filter(
+    !is.na(positionCode),
+    positionCode != "G",
+    gamesPlayed >= 15
+  ) %>%
+  mutate(
+    # Clean missing values with intelligent defaults
+    I_F_xGoals = ifelse(is.na(I_F_xGoals), 0, I_F_xGoals),
+    OnIce_F_xGoals = ifelse(is.na(OnIce_F_xGoals), gamesPlayed * replacement_stats$replacement_onice_xGF_rate, OnIce_F_xGoals),
+    OnIce_A_xGoals = ifelse(is.na(OnIce_A_xGoals), gamesPlayed * replacement_stats$replacement_onice_xGA_rate, OnIce_A_xGoals),
+    fenwick_percentage = ifelse(is.na(fenwick_percentage), replacement_stats$replacement_fenwick_pct, fenwick_percentage),
+    xG_percentage = ifelse(is.na(xG_percentage), replacement_stats$replacement_xG_pct, xG_percentage),
+    zone_start_pct = ifelse(is.na(zone_start_pct), replacement_stats$neutral_zone_start, zone_start_pct),
+    
+    # Advanced rates per game
+    individual_xG_rate = I_F_xGoals / gamesPlayed,
+    onice_xGF_rate = OnIce_F_xGoals / gamesPlayed,
+    onice_xGA_rate = OnIce_A_xGoals / gamesPlayed,
+    
+    # Position grouping
+    position_group = case_when(
+      positionCode == "C" ~ "C",
+      positionCode %in% c("L", "R") ~ "W", 
+      positionCode == "D" ~ "D",
+      TRUE ~ "Other"
+    ),
+    
+    position_detailed = case_when(
+      positionCode == "C" ~ "C",
+      positionCode == "L" ~ "LW",
+      positionCode == "R" ~ "RW", 
+      positionCode == "D" ~ "D",
+      TRUE ~ "Other"
+    )
+  ) %>%
+  filter(position_group != "Other") %>%
+  mutate(
+    # =================================================================
+    # INDIVIDUAL OFFENSIVE VALUE (IOVAR)
+    # =================================================================
+    
+    # Individual expected goals creation above replacement
+    individual_xG_above_replacement = (individual_xG_rate - replacement_stats$replacement_individual_xG_rate) * gamesPlayed,
+    
+    # Shooting efficiency (goals vs individual xG, luck-adjusted)
+    shooting_efficiency_value = ifelse(!is.na(individual_shooting_luck), 
+                                      individual_shooting_luck * gamesPlayed / 10, 0),
+    
+    # Individual Offensive Value Above Replacement
+    IOVAR = individual_xG_above_replacement + (shooting_efficiency_value * 0.3),
+    
+    # =================================================================
+    # ON-ICE TEAM IMPACT VALUE (OTVAR) 
+    # =================================================================
+    
+    # On-ice expected goals differential vs replacement
+    onice_xGF_above_replacement = (onice_xGF_rate - replacement_stats$replacement_onice_xGF_rate) * gamesPlayed,
+    onice_xGA_vs_replacement = (replacement_stats$replacement_onice_xGA_rate - onice_xGA_rate) * gamesPlayed,
+    
+    # Team luck adjustment while on ice
+    team_luck_adjustment = ifelse(!is.na(team_offensive_luck), 
+                                 team_offensive_luck * gamesPlayed / 20, 0),
+    
+    # On-Ice Team Value Above Replacement
+    OTVAR = onice_xGF_above_replacement + onice_xGA_vs_replacement + team_luck_adjustment,
+    
+    # =================================================================
+    # POSSESSION AND CONTROL VALUE (PCVAR)
+    # =================================================================
+    
+    # Fenwick percentage impact
+    fenwick_impact = (fenwick_percentage - replacement_stats$replacement_fenwick_pct) * gamesPlayed / 10,
+    
+    # Expected goals percentage impact  
+    xG_pct_impact = (xG_percentage - replacement_stats$replacement_xG_pct) * gamesPlayed / 10,
+    
+    # Possession and Control Value Above Replacement
+    PCVAR = (fenwick_impact * 0.6) + (xG_pct_impact * 0.4),
+    
+    # =================================================================
+    # USAGE AND CONTEXT ADJUSTMENTS
+    # =================================================================
+    
+    # Zone start adjustment (bonus for defensive zone starts)
+    zone_start_adjustment = (replacement_stats$neutral_zone_start - zone_start_pct) * gamesPlayed / 100,
+    
+    # Quality of competition proxy (based on onice metrics vs team averages)
+    # Higher on-ice against xG suggests tougher competition
+    competition_adjustment = pmax((onice_xGA_rate - replacement_stats$replacement_onice_xGA_rate) * gamesPlayed / 5, 0),
+    
+    # Total usage adjustment
+    usage_adjustment = zone_start_adjustment + (competition_adjustment * 0.3),
+    
+    # =================================================================
+    # POSITION-SPECIFIC GAR CALCULATION
+    # =================================================================
+    
+    # Combine components with position-specific weights
+    advanced_GAR = case_when(
+      # Wingers: Focus on individual creation + some team impact
+      position_group == "W" ~ (
+        IOVAR * 0.50 +           # Individual xG creation
+        OTVAR * 0.25 +           # On-ice team impact  
+        PCVAR * 0.20 +           # Possession impact
+        usage_adjustment * 0.05  # Context
+      ),
+      
+      # Centers: Balanced across all areas + usage matters more
+      position_group == "C" ~ (
+        IOVAR * 0.35 +           # Individual creation
+        OTVAR * 0.35 +           # Team impact (centers drive play)
+        PCVAR * 0.20 +           # Possession
+        usage_adjustment * 0.10  # Usage context
+      ),
+      
+      # Defensemen: Team impact and possession focus
+      position_group == "D" ~ (
+        IOVAR * 0.15 +           # Individual offense (limited role)
+        OTVAR * 0.50 +           # Primary role - team impact
+        PCVAR * 0.25 +           # Possession driving
+        usage_adjustment * 0.10  # Usage context
+      ),
+      
+      TRUE ~ (IOVAR * 0.33 + OTVAR * 0.33 + PCVAR * 0.33) # Default
+    ),
+    
+    # Per-game rate for comparison
+    GAR_per_game = advanced_GAR / gamesPlayed,
+    
+    # Rating categories
+    GAR_category = case_when(
+      advanced_GAR >= 12 ~ "Elite (12+ GAR)",
+      advanced_GAR >= 8 ~ "All-Star (8-12 GAR)",
+      advanced_GAR >= 4 ~ "Top-6/Top-4 (4-8 GAR)", 
+      advanced_GAR >= 0 ~ "NHL Regular (0-4 GAR)",
+      advanced_GAR >= -3 ~ "Replacement (-3-0 GAR)",
+      TRUE ~ "Below Replacement (<-3 GAR)"
+    )
+  )
+
+cat("Players in advanced GAR analysis:", nrow(nhl_gar), "\n")
+cat("Advanced GAR range:", round(min(nhl_gar$advanced_GAR, na.rm = TRUE), 1), 
+    "to", round(max(nhl_gar$advanced_GAR, na.rm = TRUE), 1), "\n")
+
+# =============================================================================
+# BEST OVERALL PLAYERS (TOP 30)
+# =============================================================================
+
+best_overall_players <- nhl_gar %>%
+  arrange(desc(advanced_GAR)) %>%
+  head(30) %>%
+  mutate(overall_rank = row_number()) %>%
+  select(overall_rank, skaterFullName, team_abbr, position_detailed, gamesPlayed,
+         advanced_GAR, GAR_per_game, IOVAR, OTVAR, PCVAR, 
+         individual_xG_rate, fenwick_percentage, xG_percentage, zone_start_pct,
+         GAR_category)
+
+cat("\n=== TOP 30 BEST OVERALL PLAYERS BY ADVANCED GAR ===\n")
+print(best_overall_players)
+
+# =============================================================================
+# POSITION-SPECIFIC RANKINGS (TOP 20 EACH)
+# =============================================================================
+
+# Best Centers
+best_centers <- nhl_gar %>%
+  filter(position_group == "C") %>%
+  arrange(desc(advanced_GAR)) %>%
+  head(20) %>%
+  mutate(center_rank = row_number()) %>%
+  select(center_rank, skaterFullName, team_abbr, advanced_GAR, GAR_per_game,
+         IOVAR, OTVAR, PCVAR, individual_xG_rate, fenwick_percentage, xG_percentage, 
+         zone_start_pct, gamesPlayed)
+
+# Best Left Wings  
+best_left_wings <- nhl_gar %>%
+  filter(position_detailed == "LW") %>%
+  arrange(desc(advanced_GAR)) %>%
+  head(20) %>%
+  mutate(lw_rank = row_number()) %>%
+  select(lw_rank, skaterFullName, team_abbr, advanced_GAR, GAR_per_game,
+         IOVAR, OTVAR, PCVAR, individual_xG_rate, fenwick_percentage, xG_percentage,
+         gamesPlayed)
+
+# Best Right Wings
+best_right_wings <- nhl_gar %>%
+  filter(position_detailed == "RW") %>%
+  arrange(desc(advanced_GAR)) %>%
+  head(20) %>%
+  mutate(rw_rank = row_number()) %>%
+  select(rw_rank, skaterFullName, team_abbr, advanced_GAR, GAR_per_game,
+         IOVAR, OTVAR, PCVAR, individual_xG_rate, fenwick_percentage, xG_percentage,
+         gamesPlayed)
+
+# Best Defensemen
+best_defensemen <- nhl_gar %>%
+  filter(position_group == "D") %>%
+  arrange(desc(advanced_GAR)) %>%
+  head(20) %>%
+  mutate(d_rank = row_number()) %>%
+  select(d_rank, skaterFullName, team_abbr, advanced_GAR, GAR_per_game,
+         IOVAR, OTVAR, PCVAR, individual_xG_rate, fenwick_percentage, xG_percentage,
+         zone_start_pct, gamesPlayed)
+
+# =============================================================================
+# DISPLAY RANKINGS
+# =============================================================================
+
+cat("\n=== TOP 20 CENTERS (ADVANCED STATS) ===\n")
+print(best_centers)
+
+cat("\n=== TOP 20 LEFT WINGS (ADVANCED STATS) ===\n") 
+print(best_left_wings)
+
+cat("\n=== TOP 20 RIGHT WINGS (ADVANCED STATS) ===\n")
+print(best_right_wings)
+
+cat("\n=== TOP 20 DEFENSEMEN (ADVANCED STATS) ===\n")
+print(best_defensemen)
+
+# =============================================================================
+# ADVANCED STATS VALIDATION
+# =============================================================================
+
+cat("\n=== VALIDATION: ADVANCED GAR vs KEY METRICS ===\n")
+
+correlations <- nhl_gar %>%
+  summarise(
+    GAR_vs_Individual_xG = cor(advanced_GAR, I_F_xGoals, use = "complete.obs"),
+    GAR_vs_OnIce_xG_diff = cor(advanced_GAR, OnIce_F_xGoals - OnIce_A_xGoals, use = "complete.obs"),
+    GAR_vs_Fenwick_Pct = cor(advanced_GAR, fenwick_percentage, use = "complete.obs"),
+    GAR_vs_xG_Pct = cor(advanced_GAR, xG_percentage, use = "complete.obs"),
+    GAR_vs_Zone_Starts = cor(advanced_GAR, zone_start_pct, use = "complete.obs")
+  )
+
+cat("Correlations with advanced metrics:\n")
+print(round(correlations, 3))
+
+# =============================================================================
+# COMPONENT ANALYSIS
+# =============================================================================
+
+component_analysis <- nhl_gar %>%
+  arrange(desc(advanced_GAR)) %>%
+  head(30) %>%
+  select(skaterFullName, position_detailed, advanced_GAR, IOVAR, OTVAR, PCVAR, usage_adjustment) %>%
+  mutate(
+    IOVAR_pct = round(IOVAR / advanced_GAR * 100, 1),
+    OTVAR_pct = round(OTVAR / advanced_GAR * 100, 1), 
+    PCVAR_pct = round(PCVAR / advanced_GAR * 100, 1)
+  )
+
+cat("\n=== TOP 30 PLAYERS: GAR COMPONENT BREAKDOWN ===\n")
+print(component_analysis)
+
+# =============================================================================
+# POSITION SUMMARIES
+# =============================================================================
+
+position_summaries <- nhl_gar %>%
+  group_by(position_detailed) %>%
+  summarise(
+    total_players = n(),
+    avg_GAR = round(mean(advanced_GAR, na.rm = TRUE), 2),
+    median_GAR = round(median(advanced_GAR, na.rm = TRUE), 2),
+    max_GAR = round(max(advanced_GAR, na.rm = TRUE), 2),
+    avg_individual_xG = round(mean(individual_xG_rate, na.rm = TRUE), 3),
+    avg_fenwick_pct = round(mean(fenwick_percentage, na.rm = TRUE), 1),
+    avg_xG_pct = round(mean(xG_percentage, na.rm = TRUE), 1),
+    elite_players = sum(advanced_GAR >= 12, na.rm = TRUE),
+    allstar_players = sum(advanced_GAR >= 8 & advanced_GAR < 12, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+cat("\n=== ADVANCED STATS POSITION SUMMARIES ===\n")
+print(position_summaries)
+
+# =============================================================================
+# TOP PERFORMER BY POSITION
+# =============================================================================
+
+top_by_position <- nhl_gar %>%
+  group_by(position_detailed) %>%
+  slice_max(advanced_GAR, n = 1) %>%
+  select(position_detailed, skaterFullName, team_abbr, advanced_GAR, 
+         individual_xG_rate, fenwick_percentage, xG_percentage, zone_start_pct) %>%
+  ungroup()
+
+cat("\n=== BEST PLAYER BY POSITION (ADVANCED STATS) ===\n")
+print(top_by_position)
+
+# =============================================================================
+# KEY INSIGHTS
+# =============================================================================
+
+best_player <- nhl_gar[which.max(nhl_gar$advanced_GAR), ]
+cat("\n=== ADVANCED STATS KEY INSIGHTS ===\n")
+cat(paste("🏆 BEST OVERALL PLAYER:", best_player$skaterFullName, 
+          "(", best_player$position_detailed, ")", 
+          "with", round(best_player$advanced_GAR, 1), "Advanced GAR\n"))
+
+elite_count <- sum(nhl_gar$advanced_GAR >= 12, na.rm = TRUE)
+allstar_count <- sum(nhl_gar$advanced_GAR >= 8 & nhl_gar$advanced_GAR < 12, na.rm = TRUE)
+
+cat(paste("🌟 Elite players (12+ GAR):", elite_count, "\n"))
+cat(paste("⭐ All-Star level (8-12 GAR):", allstar_count, "\n"))
+
+cat("\n📊 Advanced Model Features:\n")
+cat("• Individual xG Creation (I_F_xGoals)\n")
+cat("• On-Ice Team Impact (OnIce xG differential)\n")
+cat("• Possession Control (Fenwick % + xG %)\n") 
+cat("• Usage Context (Zone starts, competition)\n")
+cat("• Luck Adjustments (Individual + Team)\n")
+cat("• Position-specific weightings\n")
+
+cat("\n===============================================================\n")
+cat("AVAILABLE DATA FRAMES (ADVANCED STATS):\n")
+cat("===============================================================\n")
+cat("• best_overall_players   - Top 30 players by Advanced GAR\n")
+cat("• best_centers          - Top 20 centers\n") 
+cat("• best_left_wings       - Top 20 left wings\n")
+cat("• best_right_wings      - Top 20 right wings\n")
+cat("• best_defensemen       - Top 20 defensemen\n")
+cat("• component_analysis    - GAR breakdown by component\n")
+cat("• top_by_position       - Best player at each position\n")
+cat("• position_summaries    - Advanced stats by position\n") 
+cat("• nhl_gar              - Complete dataset with calculations\n")
+```
+
+
+
